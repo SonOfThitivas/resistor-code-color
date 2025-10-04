@@ -12,7 +12,7 @@ import cv2
 
 # image = cv2.imread(r"img\3.9k\IMG_0525.JPG")
 # image = cv2.imread(r"img\10k\IMG_0581.JPG")
-image = cv2.imread(r"res.jpg")
+image = cv2.imread(r"10k.jpg")
 # image = cv2.imread(r"img\56k\IMG_0550.JPG")
 
 # image = skimage.io.imread(r"img\3.9k\IMG_0525.JPG")
@@ -20,6 +20,8 @@ image = cv2.imread(r"res.jpg")
 # image = cv2.imread(r"img\3.9k\IMG_0536.JPG")
 # image = cv2.imread(r"img\3.9k\IMG_0540.jpg")
 # image = cv2.resize(image_cv, (800, 600), interpolation=cv2.INTER_AREA)
+
+# image = cv2.flip(image, 1)
 
 #CROP
 image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -75,9 +77,9 @@ image_crop = image[xStart:xEnd, yStart: yEnd]
 #     mask_w = 5
 #     return rank.mean(image, rectangle(mask_w, mask_w))
 
-# @adapt_rgb(each_channel)
-# def avr_each(image):
-#     return gaussian(image, sigma=3, preserve_range=True)
+@adapt_rgb(each_channel)
+def avr_each(image):
+    return gaussian(image, sigma=3, preserve_range=True)
 
 # image_blur = avr_each(image[xStart:xEnd, yStart: yEnd])
 # image_blur = image_blur.astype(image.dtype)
@@ -162,7 +164,9 @@ plt.show()
 TopSeg = []
 
 # Label connected components
-labels = measure.label(imageBottomMor.astype(np.bool))
+labels = measure.label(imageBottomMor.astype(bool))
+
+
 
 # Measure regions
 regions = measure.regionprops(labels)
@@ -196,3 +200,112 @@ for i, v in enumerate(TopSeg):
     plt.imshow(temp[:,:,::-1])
 
 plt.show()
+
+band_images = []
+for v in TopSeg:
+    temp = imageTopCrop[v["y_min"]:v["y_max"],
+                        v["x_min"]:v["x_max"]]
+    band_images.append(temp)
+
+# =================== ฟังก์ชัน crop แถบสี ===================
+def get_central_median_hsv(image, crop_ratio=0.5):
+    """
+    crop_ratio: สัดส่วนกลางของแถบที่จะเอามาวิเคราะห์ (0-1)
+    """
+    h, w = image.shape[:2]
+    h_crop = int(h * crop_ratio)
+    w_crop = int(w * crop_ratio)
+    h_start = (h - h_crop)//2
+    w_start = (w - w_crop)//2
+    central_crop = image[h_start:h_start+h_crop, w_start:w_start+w_crop]
+    
+    hsv = cv2.cvtColor(central_crop, cv2.COLOR_BGR2HSV)
+    h_med = int(np.median(hsv[:,:,0]))
+    s_med = int(np.median(hsv[:,:,1]))
+    v_med = int(np.median(hsv[:,:,2]))
+    return (h_med, s_med, v_med)
+
+
+# =================== ตารางสีตัวต้านทาน HSV (range) ===================
+resistor_colors_hsv_range = {
+    "Black":   ((0,180), (0, 80), (0,90)),
+    "Brown":   ((0, 20), (90,255), (50,150)),
+    "Red":     ((0, 8), (150,255), (100,255)),
+    "Red":    ((170,180), (150,255), (100,255)),
+    "Orange":  ((8, 25), (150,255), (130,255)),
+    "Yellow":  ((25, 40), (150,255), (150,255)),
+    "Green":   ((40, 85), (100,255), (50,255)),
+    "Blue":    ((85,140), (100,255), (50,255)),
+    "Violet":  ((140,170), (100,255), (50,255)),
+    "Gray":    ((0,180), (0, 50), (100,200)),
+    "White":   ((0,180), (0, 30), (200,255)),
+    "Gold":    ((15, 35), (50,200), (100,200)),
+    "Silver":  ((0,180), (0, 50), (150,220)),
+}
+
+# =================== ฟังก์ชันหาสีที่ใกล้ที่สุด ===================
+def closest_color_hsv(hsv_val):
+    h, s, v = hsv_val
+    for name, ((hmin,hmax),(smin,smax),(vmin,vmax)) in resistor_colors_hsv_range.items():
+        if hmin <= h <= hmax and smin <= s <= smax and vmin <= v <= vmax:
+            return name
+    return "Unknown"
+
+
+# =================== อ่านสีจาก band ===================
+band_colors = {}
+for idx, band_img in enumerate(band_images):
+    hsv_val = get_central_median_hsv(band_img, crop_ratio=0.5)
+    color_name = closest_color_hsv(hsv_val)
+    band_colors[f'Band {idx+1}'] = (hsv_val, color_name)
+
+# =================== แสดงผล ===================
+for band, (hsv_val, name) in band_colors.items():
+    print(f'{band}: HSV = {hsv_val}, Color = {name}')
+
+# =================== ตารางสี → ตัวเลข / multiplier / tolerance ===================
+resistor_color_digit = {
+    "Black": 0, "Brown": 1, "Red": 2, "Orange": 3, "Yellow": 4,
+    "Green": 5, "Blue": 6, "Violet": 7, "Gray": 8, "White": 9
+}
+
+resistor_color_multiplier = {
+    "Black": 1, "Brown": 10, "Red": 100, "Orange": 1_000, "Yellow": 10_000,
+    "Green": 100_000, "Blue": 1_000_000, "Violet": 10_000_000,
+    "Gold": 0.1, "Silver": 0.01
+}
+
+resistor_color_tolerance = {
+    "Brown": "±1%", "Red": "±2%", "Green": "±0.5%", "Blue": "±0.25%",
+    "Violet": "±0.1%", "Gray": "±0.05%", "Gold": "±5%", "Silver": "±10%"
+}
+
+# =================== เลือกชื่อสีจาก band_colors ===================
+# band_colors = {'Band 1': (...,'Red'), 'Band 3': (...,'Green'), ...}
+color_names = [
+    band_colors.get('Band 1', ('','Unknown'))[1],
+    band_colors.get('Band 2', ('','Unknown'))[1],
+    band_colors.get('Band 3', ('','Unknown'))[1],
+    # band_colors.get('Band 4', ('','Unknown'))[1]
+]
+
+# ตรวจสอบว่าอ่านสีได้ทั้งหมด
+if "Unknown" in color_names:
+    print("มี band ที่ไม่สามารถอ่านสีได้!")
+else:
+    # คำนวณค่า resistor 5-band
+    digit1 = resistor_color_digit[color_names[0]]
+    digit2 = resistor_color_digit[color_names[1]]
+    multiplier = resistor_color_multiplier[color_names[2]]
+    # tolerance = resistor_color_tolerance.get(color_names[3], "±20%")
+    
+
+    resistance_value = (digit1*10 + digit2*1) * multiplier
+
+    # แสดงผล
+    if resistance_value >= 1_000_000:
+        print(f"Resistance: {resistance_value/1_000_000} MΩ")
+    elif resistance_value >= 1_000:
+        print(f"Resistance: {resistance_value/1_000} kΩ")
+    else:
+        print(f"Resistance: {resistance_value} Ω")
