@@ -3,10 +3,9 @@ from skimage.filters import threshold_minimum, threshold_mean, rank, gaussian, s
 from skimage.feature import canny
 from skimage.color.adapt_rgb import adapt_rgb, each_channel, hsv_value
 from skimage.morphology import rectangle
+from skimage import measure
 import numpy as np
-import skimage 
 import cv2
-import numpy as np
 
 # image input
 
@@ -33,18 +32,18 @@ image_bi = image_bi.astype(np.uint8) * 255
 
 # Erosion
 kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(5,5))
-image_bi = cv2.erode(image_bi, kernel, iterations = 15)
+image_mor = cv2.erode(image_bi, kernel, iterations = 15)
 
 # plt.imshow(image_bi, cmap="gray")
 # plt.show()
 
 
 # find image boarder
-xStart, xEnd, yStart, yEnd = image_bi.shape[0],0,image_bi.shape[1],0
+xStart, xEnd, yStart, yEnd = image_mor.shape[0],0,image_mor.shape[1],0
 
-for r in range(image_bi.shape[0]):
-    for c in range(image_bi.shape[1]):
-        if image_bi[r][c]:
+for r in range(image_mor.shape[0]):
+    for c in range(image_mor.shape[1]):
+        if image_mor[r][c]:
             if xStart > r:
                 xStart = r
             
@@ -54,14 +53,21 @@ for r in range(image_bi.shape[0]):
             if r > xEnd: xEnd = r
             if c > yEnd: yEnd = c
 
+image_crop = image[xStart:xEnd, yStart: yEnd]
 
+# plt.subplot(131)
+# plt.imshow(image_bi, cmap="gray")
+# plt.title("Threshold segmentation")
 
+# plt.subplot(132)
+# plt.imshow(image_mor, cmap="gray")
+# plt.title("Erosion by morphology")
 
-print(f"xStart: {xStart}", f"xEnd: {xEnd}", f"yStart: {xStart}", f"xEnd: {yStart}", sep="\n")
-plt.imshow(image[xStart:xEnd, yStart: yEnd, ::-1])
-plt.imsave( "./rescrop5.6kv2.jpg", image[xStart:xEnd, yStart: yEnd, ::-1])
+# plt.subplot(133)
+# plt.imshow(image[xStart:xEnd, yStart: yEnd, ::-1], cmap="gray")
+# plt.title("Crop from original")
+
 # plt.show()
-
 
 # averaging filter
 # @adapt_rgb(each_channel)
@@ -73,8 +79,8 @@ plt.imsave( "./rescrop5.6kv2.jpg", image[xStart:xEnd, yStart: yEnd, ::-1])
 def avr_each(image):
     return gaussian(image, sigma=3, preserve_range=True)
 
-image_blur = avr_each(image[xStart:xEnd, yStart: yEnd])
-image_blur = image_blur.astype(image.dtype)
+# image_blur = avr_each(image[xStart:xEnd, yStart: yEnd])
+# image_blur = image_blur.astype(image.dtype)
 
 # print(image_blur)
 # plt.subplot(121)
@@ -86,28 +92,107 @@ image_blur = image_blur.astype(image.dtype)
 # plt.title("After")
 # plt.show()
 
-image_gray = cv2.cvtColor(image[xStart:xEnd, yStart: yEnd], cv2.COLOR_BGR2GRAY)
-image_sobel = sobel(image_gray)
-image_canny = canny(image_gray, sigma=3)
-
-# plt.subplot(221)
-# plt.imshow(image[xStart:xEnd, yStart: yEnd,::-1])
-# plt.title("Before")
-
-# print(image_blur)
-# plt.subplot(221)
-# plt.imshow(image[xStart:xEnd, yStart: yEnd,::-1])
-# plt.title("Before")
-
-# plt.subplot(222)
-# plt.imshow(image_blur[:,:,::-1])
-# plt.title("After")
-
-# plt.subplot(223)
-# plt.imshow(image_sobel, cmap="gray")
-# plt.title("Sobel")
-
-# plt.subplot(224)
-# plt.imshow(image_canny, cmap="gray")
-# plt.title("Canny")
+# plt.imshow(image_crop[:,:,::-1])
+# yMid = image_crop.shape[0] / 2
+# x1 = image_crop.shape[1] / 5 * 1
+# x2 = image_crop.shape[1] / 5 * 2
+# x3 = image_crop.shape[1] / 5 * 3
+# x4 = image_crop.shape[1] / 5 * 4
+# plt.scatter(x1, yMid, c="red", s=10, marker=".")
+# plt.scatter(x2, yMid, c="red", s=10, marker=".")
+# plt.scatter(x3, yMid, c="red", s=10, marker=".")
+# plt.scatter(x4, yMid, c="red", s=10, marker=".")
 # plt.show()
+
+image_gray = cv2.cvtColor(image_crop.astype(image.dtype), cv2.COLOR_BGR2GRAY)
+# # image_sobel = sobel(image_gray)
+image_canny = canny(image_gray, sigma=1)
+
+
+# quartile seperation
+yQ1 = image_gray.shape[0] // 3 * 1
+yQ2 = image_gray.shape[0] // 3 * 2
+
+imageTopCrop = image_crop[:yQ1,:]
+imageBottomCrop = image_crop[yQ2:,:]
+
+plt.subplot(121)
+plt.imshow(imageTopCrop[:,:,::-1])
+
+plt.subplot(122)
+plt.imshow(imageBottomCrop[:,:,::-1])
+
+plt.show()
+
+# Binomal histrogram / threshold segmentation
+imageTopGray = cv2.cvtColor(imageTopCrop, cv2.COLOR_BGR2GRAY)
+imageTopMean = threshold_mean(imageTopGray)
+imageTopBi = imageTopGray < imageTopMean
+imageTopBi = imageTopBi.astype(np.uint8) * 255
+
+imageBottonGray = cv2.cvtColor(imageBottomCrop, cv2.COLOR_BGR2GRAY)
+imageBottonMean = threshold_mean(imageBottonGray)
+imageBottomBi = imageBottonGray < imageBottonMean
+imageBottomBi = imageBottomBi.astype(np.uint8) * 255
+
+plt.subplot(121)
+plt.imshow(imageTopBi, cmap="gray")
+
+plt.subplot(122)
+plt.imshow(imageBottomBi, cmap="gray")
+
+plt.show()
+
+# Erosion
+kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(5,5))
+imageTopMor = cv2.erode(imageTopBi, kernel, iterations = 5)
+
+# Erosion
+kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(5,5))
+imageBottomMor = cv2.erode(imageBottomBi, kernel, iterations = 5)
+
+plt.subplot(121)
+plt.imshow(imageTopMor, cmap="gray")
+
+plt.subplot(122)
+plt.imshow(imageBottomMor, cmap="gray")
+
+plt.show()
+
+TopSeg = []
+
+# Label connected components
+labels = measure.label(imageBottomMor.astype(np.bool))
+
+# Measure regions
+regions = measure.regionprops(labels)
+print(regions[0].bbox)
+# Extract x,y ranges for each segment
+for i, region in enumerate(regions, start=1):
+    min_row, min_col, max_row, max_col = region.bbox
+
+    # Note: rows = Y, cols = X in image coordinates
+    y_min, y_max = min_row, max_row
+    x_min, x_max = min_col, max_col
+
+    print(f"Segment {i}:")
+    print(f" - X range: {x_min} → {x_max}")
+    print(f" - Y range: {y_min} → {y_max}")
+    print()
+    TopSeg.append(
+        {
+            "x_min": x_min,
+            "x_max": x_max,
+            "y_min": y_min,
+            "y_max": y_max,
+        }
+    )
+    
+for i, v in enumerate(TopSeg):
+    plt.subplot(1, len(TopSeg), i+1)
+    print(v)
+    temp = imageTopCrop[v["y_min"]:v["y_max"],
+                        v["x_min"]:v["x_max"]]
+    plt.imshow(temp[:,:,::-1])
+
+plt.show()
